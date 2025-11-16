@@ -1,4 +1,5 @@
 "use client";
+import { digital } from "../ui/fonts";
 import { useState, useRef, useEffect } from "react";
 
 const Clock = () => {
@@ -11,14 +12,17 @@ const Clock = () => {
 	useEffect(() => {
 		function showTime() {
 			timeRef.current = new Date().toLocaleTimeString();
-			console.log(time);
 			setTime(timeRef.current);
 		}
-		const interval = setInterval(showTime, 1000);
+		const interval = setInterval(showTime, 50);
 		return () => clearInterval(interval);
 	}, [time]);
 
-	return <div>{time}</div>;
+	return (
+		<div className={`${digital.className} text-textred text-9xl`}>
+			{time}
+		</div>
+	);
 };
 
 export default Clock;
