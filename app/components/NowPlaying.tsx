@@ -48,20 +48,23 @@ export default function NowPlaying() {
 			clearInterval(id);
 		};
 	}, []);
+	// todo: add a progress bar of the music
 
 	if (!song) return;
 	if (!song.isPlaying) return;
 	return (
-		<div className="border-2 border-gray-500 rounded-2xl flex flex-col bg-gray-800 m-3 px-4 py-2">
-			<p className="text-gray-400 italic text-sm mb-1">Now playing...</p>
-			<div className="inline-flex items-center">
+		<div className="border-2 border-gray-500 rounded-2xl flex flex-col bg-gray-800 m-3 px-4 py-3">
+			<p className="text-gray-400 italic text-sm mb-1">
+				I&apos;m currently listening to...
+			</p>
+			<div className="inline-flex items-center align-middle">
 				{song.albumImageUrl && (
 					<Image
 						src={song.albumImageUrl}
 						alt={`Album cover for ${song.title}`}
 						width={46}
 						height={46}
-						className="mr-2"
+						className="mr-3 rounded-xs"
 					></Image>
 				)}
 				<div className="flex flex-col">

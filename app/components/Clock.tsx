@@ -21,6 +21,7 @@ const Clock = () => {
 	return (
 		<div className={`${digital.className} text-textred text-9xl`}>
 			{time}
+			{/* alara martin */}
 		</div>
 	);
 };
