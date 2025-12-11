@@ -23,7 +23,7 @@ export async function GET() {
 
     return NextResponse.json({
         repo: pushEvent.repo.name,
-        sha: pushEvent.payload.head.substring(0, 7),
+        sha: pushEvent.payload.head,
         timestamp: pushEvent.created_at
     });
 }

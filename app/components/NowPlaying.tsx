@@ -49,11 +49,13 @@ export default function NowPlaying() {
 		};
 	}, []);
 	// todo: add a progress bar of the music
+	// todo: glow and border is color of album cover
+	// todo: pulses to beat/bass of music
 
 	if (!song) return;
 	if (!song.isPlaying) return;
 	return (
-		<div className="border-2 border-gray-500 rounded-2xl flex flex-col bg-gray-800 m-3 px-4 py-3">
+		<div className="border border-gray-500 rounded-2xl glow-pulse flex flex-col bg-inherit m-5 px-4 py-3">
 			<p className="text-gray-400 italic text-sm mb-1">
 				I&apos;m currently listening to...
 			</p>

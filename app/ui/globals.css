@@ -13,7 +13,7 @@
 	--font-sans: var(--font-geist-sans);
 	--font-mono: var(--font-geist-mono);
 	--color-textred: #b50000;
-	--color-textwhite: #c7c7c7;
+	--color-textwhite: #d8d8d8;
 }
 
 body {
@@ -34,4 +34,18 @@ body {
 
 .pulse {
 	animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes glow-pulse {
+	0%,
+	100% {
+		box-shadow: 0 0 20px 5px rgba(107, 114, 128, 0.4);
+	}
+	50% {
+		box-shadow: 0 0 20px 5px rgba(107, 114, 128, 0.05);
+	}
+}
+
+.glow-pulse {
+	animation: glow-pulse 2s ease-in-out infinite;
 }
