@@ -20,7 +20,34 @@ const getLink = (repo: string, sha?: string) => {
 
 const formatTime = (timestamp: string) => {
 	// YYYY-MM-DDTHH:MM:SSZ UTC
-	return timestamp;
+	const currentTime = Date.now();
+	const timeOfCommit = new Date(timestamp).getTime();
+	const timeSinceCommit = currentTime - timeOfCommit;
+	let toReturn: string;
+	if (timeSinceCommit <= 60000) {
+		// seconds
+		toReturn = "0 min";
+	} else if (timeSinceCommit <= 3600000) {
+		// minutes
+		toReturn = `${Math.floor(timeSinceCommit / 60000)} min`;
+	} else if (timeSinceCommit <= 86400000) {
+		// hours
+		toReturn = `${Math.floor(timeSinceCommit / 3.6e6)} hr`;
+	} else if (timeSinceCommit <= 604800000) {
+		// days
+		const days = Math.floor(timeSinceCommit / 8.64e7);
+		toReturn = `${days} day${days > 1 ? "s" : ""}`;
+	} else if (timeSinceCommit <= 2592000000) {
+		// weeks
+		toReturn = `${Math.floor(timeSinceCommit / 6.048e8)} wk`;
+	} else if (timeSinceCommit <= 31556952000) {
+		// months
+		toReturn = `${Math.floor(timeSinceCommit / 2.628e9)} mon`;
+	} else {
+		// years
+		toReturn = `${Math.floor(timeSinceCommit / 3.154e10)} yr`;
+	}
+	return toReturn + " ago";
 };
 
 export default function MostRecentCommit() {
@@ -58,14 +85,13 @@ export default function MostRecentCommit() {
 	}, []);
 
 	if (!commit) return;
-	// todo: convert time iso68 or whatever to like "...min/hour/day/wk ago"
 	// todo: decide if i also want private repos included
 	// 			idea: have a boolean for private/public and have "(private)" next to repo link
 
 	return (
-		<div className="border border-gray-500 text-sm rounded-md text-textwhite flex flex-col bg-inherit m-5 px-4 py-3">
+		<div className="border border-gray-500 text-sm rounded-md text-textwhite flex flex-col bg-inherit m-5 px-4 py-3 glow-hover hover:shadow-[0_0_20px_5px_rgba(107,114,128,0.4)] transition-shadow duration-300">
 			<div className="flex justify-between mb-1">
-				<p className="">
+				<p className="text-gray-300">
 					<GithubLogoIcon size={17} />
 				</p>
 				<p className="text-gray-400 italic">

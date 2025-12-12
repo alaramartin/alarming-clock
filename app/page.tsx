@@ -13,7 +13,7 @@ export default function Home() {
 				<MostRecentCommit />
 			</div>
 
-			<div className="flex flex-col items-center text-textwhite border-8 border-gray-500 rounded-2xl p-20">
+			<div className="flex flex-col items-center text-textwhite border-8 border-gray-500 rounded-2xl p-32">
 				<div className="self-start flex transform translate-x-8 items-center space-x-1">
 					<div className="pulse bg-green-600 rounded-full w-2 h-2 inline-flex"></div>
 					<p className="inline-flex">I&apos;m always online.</p>

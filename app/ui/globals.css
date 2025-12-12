@@ -4,7 +4,7 @@
 	--background: #181515;
 	--foreground: #b50000;
 	--textred: #b50000;
-	--textwhite: #c7c7c7;
+	--textwhite: #d8d8d8;
 }
 
 @theme {
@@ -39,7 +39,7 @@ body {
 @keyframes glow-pulse {
 	0%,
 	100% {
-		box-shadow: 0 0 20px 5px rgba(107, 114, 128, 0.4);
+		box-shadow: 0 0 20px 5px rgba(107, 114, 128, 0.8);
 	}
 	50% {
 		box-shadow: 0 0 20px 5px rgba(107, 114, 128, 0.05);
@@ -48,4 +48,18 @@ body {
 
 .glow-pulse {
 	animation: glow-pulse 2s ease-in-out infinite;
+}
+
+@keyframes glow-hover {
+	0%,
+	100% {
+		border-color: #6b7280;
+	}
+	50% {
+		border-color: #b5b5b5;
+	}
+}
+
+.glow-hover:hover {
+	animation: glow-hover 1s ease-in-out forwards;
 }
