@@ -32,7 +32,7 @@ const MainDisplay = () => {
 					Contact
 				</button>
 			</div>
-			<div className="flex flex-col items-center text-textwhite border-8 border-gray-500 justify-center rounded-2xl w-[54em] h-[27em]">
+			<div className="flex flex-col items-center text-textwhite border-8 border-gray-500 justify-center rounded-2xl w-[54em] h-[27em] overflow-y-auto">
 				{selectedTab === "home" && <Home />}
 				{selectedTab === "projects" && <Projects />}
 				{selectedTab === "contact" && <Contact />}
