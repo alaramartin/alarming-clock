@@ -2,7 +2,7 @@
 import { digital } from "../ui/fonts";
 import { useState, useRef, useEffect } from "react";
 
-const Clock = () => {
+const Time = () => {
 	const [time, setTime] = useState("");
 	const timeRef = useRef(time);
 	useEffect(() => {
@@ -26,4 +26,4 @@ const Clock = () => {
 	);
 };
 
-export default Clock;
+export default Time;
