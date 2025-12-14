@@ -20,7 +20,7 @@ export const projects: {
         notes: ["3000+ users :)"],
         tags: ["TypeScript", "Python", "VS_Code_API", "HTMLCSS", "JavaScript"],
         year: 2025,
-        imageFilename: "hourglass-high-duotone.png"
+        imageFilename: "pkl-example.png"
     },
     {
         name: "DICOM Viewer",
@@ -32,6 +32,7 @@ export const projects: {
         notes: ["250+ users :)", "first vscode extension"],
         tags: ["TypeScript", "JavaScript", "VS_Code_API", "HTMLCSS"],
         year: 2025,
+        imageFilename: "dicom-example.png"
     },
     {
         name: "AP Score Reveal",
@@ -49,16 +50,7 @@ export const projects: {
             "TailwindCSS",
         ],
         year: 2025,
-    },
-    {
-        name: "HIPSTER-AI",
-        githubLink: "https://github.com/stanfordaide/hipster-ai",
-        miniDescription: "Under 1mm MPJPE. Aura.",
-        description:
-            "Pediatric acetabular index machine learning cool stuff. Built for Stanford AI Development and Evaluation Lab.",
-        notes: ["deployment in progress", "0.98mm MPJPE", "resnet-50 backbone, faster-rcnn-based keypoint detection model"],
-        tags: ["PyTorch", "Python", "Git"],
-        year: 2025,
+        imageFilename: "ap-score-example.png"
     },
     {
         name: "Website",
@@ -76,5 +68,17 @@ export const projects: {
             "whimsy",
         ],
         year: 2025,
+        imageFilename: "website-example.png"
     },
+    {
+        name: "HIPSTER-AI",
+        githubLink: "https://github.com/stanfordaide/hipster-ai",
+        miniDescription: "Under 1mm MPJPE. Aura.",
+        description:
+            "Pediatric acetabular index machine learning cool stuff. Built for Stanford AI Development and Evaluation Lab.",
+        notes: ["deployment in progress", "0.98mm MPJPE", "resnet-50 backbone, faster-rcnn-based keypoint detection model"],
+        tags: ["PyTorch", "Python", "Git"],
+        year: 2025,
+    },
+    
 ];
