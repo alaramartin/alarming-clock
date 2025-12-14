@@ -55,7 +55,9 @@ export default function ProjectCard({ project }: ProjectCardProps) {
 							target="_blank"
 							rel="noopener noreferrer"
 						>
-							<GithubLogoIcon size={22} />
+							<div className="size-5.5 hover:-translate-y-0.5 transition-all duration-150">
+								<GithubLogoIcon size="auto" />
+							</div>
 						</Link>
 					</div>
 				</div>

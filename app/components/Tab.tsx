@@ -7,12 +7,11 @@ interface TabProps {
 const Tab = ({ type, selected, onTabChange }: TabProps) => {
 	return (
 		<div
-			className={`cursor-pointer ${
-				!selected && "opacity-70"
-			} border-4 border-gray-500 -mb-2 px-2 py-1 ${
-				selected &&
-				"border-4 -mb-3 border-b-13 border-b-background text-textred"
-			} z-1000 rounded-lg`}
+			className={`cursor-pointer px-3 py-1 border border-gray-500 rounded-t-lg ${
+				selected
+					? "bg-background border-b-transparent -mb-px z-40"
+					: "bg-transparent z-10 opacity-70"
+			}`}
 			onClick={onTabChange}
 		>
 			{type}

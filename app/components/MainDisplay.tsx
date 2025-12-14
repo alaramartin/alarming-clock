@@ -8,7 +8,6 @@ import { useState } from "react";
 const tabTypes: string[] = ["Home", "Projects", "Contact"];
 
 const MainDisplay = () => {
-	// default to homepage (just the clock)
 	const [selectedTab, setTab] = useState("Home");
 
 	return (
@@ -23,7 +22,8 @@ const MainDisplay = () => {
 					></Tab>
 				))}
 			</div>
-			<div className="flex flex-col items-center text-textwhite border-8 border-gray-500 justify-center rounded-2xl w-[54em] h-[27em] overflow-y-auto">
+
+			<div className="flex flex-col items-center text-textwhite border border-gray-500 justify-center rounded-2xl w-[54em] h-[27em] overflow-y-auto z-10">
 				{selectedTab === "Home" && <Home />}
 				{selectedTab === "Projects" && <Projects />}
 				{selectedTab === "Contact" && <Contact />}
