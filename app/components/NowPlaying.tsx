@@ -55,7 +55,7 @@ export default function NowPlaying() {
 	if (!song) return;
 	if (!song.isPlaying) return;
 	return (
-		<div className="border border-gray-500 rounded-2xl glow-pulse flex flex-col bg-inherit m-5 px-4 py-3">
+		<div className="border border-textred/50 rounded-2xl glow-pulse flex flex-col bg-inherit m-5 px-4 py-3">
 			<p className="text-gray-400 italic text-sm mb-1">
 				I&apos;m currently listening to...
 			</p>
