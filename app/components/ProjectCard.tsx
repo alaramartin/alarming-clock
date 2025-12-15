@@ -20,7 +20,7 @@ interface ProjectCardProps {
 
 export default function ProjectCard({ project }: ProjectCardProps) {
 	return (
-		<div className="flex flex-col p-4 items-center w-full h-70 justify-between">
+		<div className="flex flex-col p-4 items-center w-full h-25 md:h-70 justify-between">
 			<div className="h-3/4 group relative rounded-md border border-textwhite/80 hover:border-textwhite w-[99%] hover:w-full hover:h-[76%] transition-all duration-100 items-center text-center justify-center flex">
 				{project.href && (
 					<div className="rounded-full absolute top-2 right-2 bg-gray-500/70 opacity-70 group-hover:opacity-90 hover:opacity-100 transition-all duration-100 cursor-pointer p-1.5">
@@ -56,7 +56,7 @@ export default function ProjectCard({ project }: ProjectCardProps) {
 							rel="noopener noreferrer"
 						>
 							<div className="size-5.5 hover:-translate-y-0.5 transition-all duration-150">
-								<GithubLogoIcon size="auto" />
+								<GithubLogoIcon />
 							</div>
 						</Link>
 					</div>

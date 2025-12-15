@@ -20,7 +20,7 @@ const Time = () => {
 
 	return (
 		<div
-			className={`${digital.className} text-textred text-9xl`}
+			className={`${digital.className} text-textred text-7xl md:text-9xl`}
 			style={{
 				textShadow:
 					"0 0 8px rgba(203,42,38,0.3), 0 0 20px rgba(203,42,38,0.2), 0 0 36px rgba(203,42,38,0.05)",

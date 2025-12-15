@@ -75,7 +75,7 @@ export default function MostRecentCommit() {
 		}
 
 		fetchLatestCommit();
-		const id = setInterval(fetchLatestCommit, 960000);
+		const id = setInterval(fetchLatestCommit, 120000);
 
 		return () => {
 			mountedRef.current = false;

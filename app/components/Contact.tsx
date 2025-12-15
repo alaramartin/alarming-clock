@@ -57,9 +57,9 @@ const Contact = () => {
 	return (
 		<div className="flex flex-col w-full h-full p-6 self-stretch items-start">
 			<div className="inline-flex mb-8">
-				You made it this far... that&apos;s alarming. Might as well{" "}
+				You made it this far... that&apos;s alarming. Might as well...
 				<p
-					className={`ml-1 -translate-y-1 ${garamond.className} text-xl`}
+					className={`ml-1 -translate-y-1 ${garamond.className} text-xl text-center`}
 				>
 					contact me.
 				</p>

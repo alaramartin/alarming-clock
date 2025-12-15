@@ -23,7 +23,7 @@ const MainDisplay = () => {
 				))}
 			</div>
 
-			<div className="flex flex-col items-center text-textwhite border border-gray-500 justify-center rounded-2xl w-[54em] h-[27em] overflow-y-auto z-10">
+			<div className="flex flex-col items-center text-textwhite border border-gray-500 justify-center rounded-2xl w-full h-1/2 md:w-[54em] md:h-[27em] overflow-y-auto z-10">
 				{selectedTab === "Home" && <Home />}
 				{selectedTab === "Projects" && <Projects />}
 				{selectedTab === "Contact" && <Contact />}
