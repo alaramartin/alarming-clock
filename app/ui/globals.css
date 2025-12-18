@@ -63,3 +63,9 @@ body {
 .glow-hover:hover {
 	animation: glow-hover 1s ease-in-out forwards;
 }
+
+body {
+	background-color: var(--background);
+	background-image: url("/checker.jpg");
+	background-blend-mode: overlay;
+}

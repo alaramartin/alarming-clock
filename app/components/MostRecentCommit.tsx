@@ -89,7 +89,7 @@ export default function MostRecentCommit() {
 	// 			idea: have a boolean for private/public and have "(private)" next to repo link
 
 	return (
-		<div className="border border-gray-500 text-sm rounded-md text-textwhite flex flex-col bg-inherit m-5 px-4 py-3 glow-hover hover:shadow-[0_0_20px_5px_rgba(107,114,128,0.4)] transition-shadow duration-300">
+		<div className="border border-gray-500 text-sm rounded-md text-textwhite flex flex-col bg-background m-5 px-4 py-3 glow-hover hover:shadow-[0_0_20px_5px_rgba(107,114,128,0.4)] transition-shadow duration-300">
 			<div className="flex justify-between mb-1">
 				<p className="text-gray-300">
 					<GithubLogoIcon size={17} />

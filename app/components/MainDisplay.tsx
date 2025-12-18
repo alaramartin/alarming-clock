@@ -12,7 +12,7 @@ const MainDisplay = () => {
 
 	return (
 		<div className="flex flex-col">
-			<div className="flex flex-row justify-end gap-x-3 text-textwhite mr-4">
+			<div className="inline-flex flex-row justify-end gap-x-3 text-textwhite mr-4">
 				{tabTypes.map((tab, index) => (
 					<Tab
 						key={index}
@@ -23,7 +23,7 @@ const MainDisplay = () => {
 				))}
 			</div>
 
-			<div className="flex flex-col items-center text-textwhite border border-gray-500 justify-center rounded-2xl w-full h-1/2 md:w-[54em] md:h-[27em] overflow-y-auto z-10">
+			<div className="flex flex-col items-center text-textwhite border border-gray-500 justify-center bg-background rounded-2xl w-full h-1/2 md:w-[54em] md:h-[27em] overflow-y-auto z-10">
 				{selectedTab === "Home" && <Home />}
 				{selectedTab === "Projects" && <Projects />}
 				{selectedTab === "Contact" && <Contact />}
