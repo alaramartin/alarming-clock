@@ -1,17 +1,23 @@
 import Link from "next/link";
+import type { ComponentType } from "react";
 
-type Contact = {
-	contactType: string;
-	href: string;
-	username: string;
-	icon: React.ElementType;
+type ContactIconProps = {
+	size?: number | string;
+	className?: string;
 };
 
-interface ContactProps {
-	contact: Contact;
+export interface ContactItem {
+	contactType: string;
+	username: string;
+	href: string;
+	icon: ComponentType<ContactIconProps>;
 }
 
-export default function ContactCard({ contact }: ContactProps) {
+interface ContactCardProps {
+	contact: ContactItem;
+}
+
+export default function ContactCard({ contact }: ContactCardProps) {
 	const IconComponent = contact.icon;
 	return (
 		<div className="flex w-full">

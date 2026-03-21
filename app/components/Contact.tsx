@@ -8,13 +8,9 @@ import {
 	SlackLogoIcon,
 	InstagramLogoIcon,
 } from "@phosphor-icons/react";
+import type { ContactItem } from "./ContactCard";
 
-const contactLinks: {
-	contactType: string;
-	href: string;
-	username: string;
-	icon: any; // eslint-disable-line
-}[] = [
+const contactLinks: ContactItem[] = [
 	{
 		contactType: "Email",
 		href: "mailto:alara.martin@gmail.com",
