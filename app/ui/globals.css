@@ -5,6 +5,7 @@
 	--foreground: #cb2a26;
 	--textred: #cb2a26;
 	--textwhite: #d8d8d8;
+	--albumcolor: 203, 42, 38;
 }
 
 @theme {
@@ -39,10 +40,10 @@ body {
 @keyframes glow-pulse {
 	0%,
 	100% {
-		box-shadow: 0 0 20px 5px rgba(203, 42, 38, 0.5);
+		box-shadow: 0 0 20px 5px rgba(var(--albumcolor), 0.5);
 	}
 	50% {
-		box-shadow: 0 0 20px 5px rgba(203, 42, 38, 0.05);
+		box-shadow: 0 0 20px 5px rgba(var(--albumcolor), 0.05);
 	}
 }
 
