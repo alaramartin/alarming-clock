@@ -142,7 +142,7 @@ function makeFlareTexture(): THREE.Texture {
 
 // --- Key-press particle trail (tunable) --------------------------------------
 const MAX_PARTICLES = 1200; // ring-buffer pool size
-const PARTICLE_LIFETIME = 0.7; // seconds (× random 0.7–1.3); "fades fairly quickly"
+const PARTICLE_LIFETIME = 1.2; // seconds (× random 0.7–1.3); lingers a bit before fading
 const PARTICLE_FADE_IN = 0.08; // seconds to ramp to full opacity (avoids a hard pop-in)
 const PARTICLE_SIZE = 11; // base point size in px (× random 0.6–1.4)
 const TRAIL_DENSITY = 1.1; // particles per world unit along the segment between two keys
@@ -243,6 +243,26 @@ function buildMatrices() {
 
 const BASE_COLOR = "#0d0d0f"; // decorative (non-key) columns
 
+// How far the lights are tinted toward the album color. The directional "key"
+// light is kept near-neutral so albedo reads true — a fully album-tinted key
+// light multiplies the keyboard hexagons into a muddy hue (e.g. a yellow
+// --keycolor under a navy light renders olive-green). The album color instead
+// pervades the scene through the dimmer, uniform ambient fill and the emissive
+// floor glow, which set the mood without corrupting the hex colors.
+// The album's MAIN color comes from the directional light hitting near-black
+// columns: lit faces glow the album color, shadowed faces fall dark → a moody,
+// "backlit wall" whose brightness stays controlled no matter how light or dark the
+// cover is (the dark albedo, not the cover, sets the brightness). Ambient stays
+// neutral and low so shadows read.
+const LIGHT_TINT = 1.0; // directional key light: 0 = white, 1 = full album color
+const AMBIENT_TINT = 0.0; // ambient fill stays neutral white
+
+// The accent (keyboard) hexagons are drawn as per-instance EMISSIVE so they show
+// their true --keycolor regardless of the album-colored light (a lit yellow under
+// a blue light would otherwise read olive). Kept just under the bloom threshold so
+// they're a solid color, not a neon glow.
+const EMISSIVE_STRENGTH = 0.7;
+
 // Read a CSS custom property and coerce it to a THREE-parseable color string.
 // Accepts hex ("#rrggbb") or a bare "r, g, b" triple (wrapped as rgb()).
 function readCssVarColor(name: string): string | null {
@@ -266,10 +286,10 @@ function readCssColor(): string | null {
 
 function Scene({
 	lightColor,
-	lightIntensity = 20,
+	lightIntensity = 18,
 	lightAzimuthDeg = 45,
 	lightElevDeg = 30,
-	ambientIntensity = 0.4,
+	ambientIntensity = 0.35,
 }: BasaltBackgroundProps) {
 	const { scene } = useThree();
 	const lightRef = useRef<THREE.DirectionalLight>(null);
@@ -288,6 +308,29 @@ function Scene({
 		}
 	}, [resolved]);
 
+	// Near-neutral key light (keeps hexagon albedo true) and a more album-tinted
+	// ambient fill (carries the mood). See LIGHT_TINT / AMBIENT_TINT above.
+	const keyLightColor = useMemo(() => {
+		try {
+			return new THREE.Color("#ffffff").lerp(
+				new THREE.Color(resolved as string),
+				LIGHT_TINT,
+			);
+		} catch {
+			return new THREE.Color("#ffffff");
+		}
+	}, [resolved]);
+	const ambientColor = useMemo(() => {
+		try {
+			return new THREE.Color("#ffffff").lerp(
+				new THREE.Color(resolved as string),
+				AMBIENT_TINT,
+			);
+		} catch {
+			return new THREE.Color("#ffffff");
+		}
+	}, [resolved]);
+
 	useEffect(() => {
 		if (!floorRef.current) return;
 		floorRef.current.color.copy(floorColor);
@@ -296,17 +339,38 @@ function Scene({
 
 	const geo = useMemo(() => buildHexPrism(), []);
 	// White base so per-instance colors (instanceColor) act as the true albedo.
-	const mat = useMemo(
-		() =>
-			new THREE.MeshStandardMaterial({
-				color: "#ffffff",
-				roughness: 0.6,
-				metalness: 0.0,
-				flatShading: true,
-			}),
-		[],
-	);
+	// Patched to add a per-instance emissive term (`instanceEmissive`) so the
+	// keyboard hexagons can self-illuminate their accent color independent of light.
+	const mat = useMemo(() => {
+		const m = new THREE.MeshStandardMaterial({
+			color: "#ffffff",
+			roughness: 0.6,
+			metalness: 0.0,
+			flatShading: true,
+		});
+		m.onBeforeCompile = (shader) => {
+			shader.vertexShader = (
+				"attribute vec3 instanceEmissive;\nvarying vec3 vInstEmissive;\n" +
+				shader.vertexShader
+			).replace(
+				"void main() {",
+				"void main() {\n\tvInstEmissive = instanceEmissive;",
+			);
+			shader.fragmentShader = (
+				"varying vec3 vInstEmissive;\n" + shader.fragmentShader
+			).replace(
+				"#include <emissivemap_fragment>",
+				"#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += vInstEmissive;",
+			);
+		};
+		return m;
+	}, []);
 	const { count, buf } = useMemo(() => buildMatrices(), []);
+	// Per-instance emissive (accent glow on keyboard columns; 0 elsewhere).
+	const emissiveAttr = useMemo(
+		() => new THREE.InstancedBufferAttribute(new Float32Array(count * 3), 3),
+		[count],
+	);
 
 	const meshRef = useRef<THREE.InstancedMesh>(null);
 	// Active holds: index -> { keydown time, keyup time | null, height at release }.
@@ -432,34 +496,51 @@ function Scene({
 		} catch {}
 	}, [trailColor, particleMat]);
 
-	// One-time fill of every instance matrix + base (dark) color from the buffer.
+	// One-time fill of every instance matrix from the buffer + the emissive attr.
 	useEffect(() => {
 		const mesh = meshRef.current;
 		if (!mesh) return;
+		geo.setAttribute("instanceEmissive", emissiveAttr);
 		const m = scratchRef.current;
-		const dark = new THREE.Color(BASE_COLOR);
 		for (let i = 0; i < count; i++) {
 			m.fromArray(buf, i * 16);
 			mesh.setMatrixAt(i, m);
-			mesh.setColorAt(i, dark);
 		}
 		mesh.instanceMatrix.needsUpdate = true;
-		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-	}, [count, buf]);
+	}, [count, buf, geo, emissiveAttr]);
 
-	// Tint just the interactive (keyboard) columns with the current key color.
+	// Per-instance albedo. Decorative columns are near-black: their *color* comes
+	// from the album-tinted directional light → the moody "backlit wall". Keyboard
+	// columns are pure black albedo so only their emissive accent (below) shows,
+	// keeping the accent color accurate regardless of the colored light.
 	useEffect(() => {
 		const mesh = meshRef.current;
 		if (!mesh) return;
-		let c: THREE.Color;
+		const dark = new THREE.Color(BASE_COLOR);
+		const black = new THREE.Color(0, 0, 0);
+		for (let i = 0; i < count; i++) {
+			mesh.setColorAt(i, KEYBOARD_INDEX_SET.has(i) ? black : dark);
+		}
+		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+	}, [count]);
+
+	// Drive the keyboard columns' emissive glow from the --keycolor accent.
+	useEffect(() => {
+		let col: THREE.Color;
 		try {
-			c = new THREE.Color(keyColor);
+			col = new THREE.Color(keyColor);
 		} catch {
 			return;
 		}
-		for (const i of KEYBOARD_INDEX_SET) mesh.setColorAt(i, c);
-		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-	}, [keyColor]);
+		const arr = emissiveAttr.array as Float32Array;
+		arr.fill(0);
+		for (const i of KEYBOARD_INDEX_SET) {
+			arr[i * 3] = col.r * EMISSIVE_STRENGTH;
+			arr[i * 3 + 1] = col.g * EMISSIVE_STRENGTH;
+			arr[i * 3 + 2] = col.b * EMISSIVE_STRENGTH;
+		}
+		emissiveAttr.needsUpdate = true;
+	}, [keyColor, emissiveAttr]);
 
 	// Map key presses to a column pop + a particle trail between consecutive keys.
 	useEffect(() => {
@@ -704,10 +785,8 @@ function Scene({
 
 	useEffect(() => {
 		if (!lightRef.current) return;
-		try {
-			lightRef.current.color.set(resolved);
-		} catch {}
-	}, [resolved]);
+		lightRef.current.color.copy(keyLightColor);
+	}, [keyLightColor]);
 
 	useEffect(() => {
 		if (lightColor !== undefined) return;
@@ -755,10 +834,10 @@ function Scene({
 
 	return (
 		<>
-			<ambientLight intensity={ambientIntensity} />
+			<ambientLight color={ambientColor} intensity={ambientIntensity} />
 			<directionalLight
 				ref={lightRef}
-				color={resolved}
+				color={keyLightColor}
 				intensity={lightIntensity}
 				position={[
 					Math.sin(az) * Math.cos(el) * D,
@@ -813,7 +892,7 @@ function BasaltCanvas(props: BasaltBackgroundProps) {
 			<Scene {...props} />
 			<EffectComposer>
 				<Bloom
-					intensity={0.4}
+					intensity={0.6}
 					luminanceThreshold={0.7}
 					luminanceSmoothing={0.9}
 					mipmapBlur
