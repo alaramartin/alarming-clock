@@ -5,7 +5,7 @@ import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import dynamic from "next/dynamic";
 import * as THREE from "three";
 import { buildNoise } from "./noise";
-import { codeToIndex } from "./keyboardMap";
+import { codeToIndex, KEYBOARD_INDEX_SET } from "./keyboardMap";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 
 export interface BasaltBackgroundProps {
@@ -17,7 +17,7 @@ export interface BasaltBackgroundProps {
 	style?: React.CSSProperties;
 }
 
-const R = 1.0;
+const R = 1.2; // hexagon circumradius; also drives grid spacing (SX/SZ), so larger = fewer, bigger columns
 const COL_HEIGHT = 2.5;
 const AMPLITUDE = 5.5;
 const NOISE_SCALE = 0.15;
@@ -50,6 +50,45 @@ function popOffset(t: number): number {
 		Math.sin(POP_OMEGA * u)
 	);
 }
+
+// --- Key-press particle trail (tunable) --------------------------------------
+const MAX_PARTICLES = 1200; // ring-buffer pool size
+const PARTICLE_LIFETIME = 0.7; // seconds (× random 0.7–1.3); "fades fairly quickly"
+const PARTICLE_FADE_IN = 0.08; // seconds to ramp to full opacity (avoids a hard pop-in)
+const PARTICLE_SIZE = 11; // base point size in px (× random 0.6–1.4)
+const TRAIL_DENSITY = 1.1; // particles per world unit along the segment between two keys
+const TRAIL_MIN = 4; // min/max particles per segment
+const TRAIL_MAX = 60;
+const TRAIL_BURST = 4; // particles emitted at a key with no recent predecessor
+const TRAIL_MAX_GAP = 1.2; // s: presses farther apart than this don't get connected
+const TRAIL_JITTER = 0.5; // random lateral spread off the segment (world units)
+const TRAIL_DRIFT = 1.6; // horizontal float speed (world units/s)
+const TRAIL_RISE = 1.2; // upward (toward-camera) float bias (world units/s)
+const TRAIL_DAMP = 0.94; // per-frame velocity damping
+const PARTICLE_Y = COL_HEIGHT + 0.4; // spawn just above the column tops
+
+const PARTICLE_VERT = `
+	attribute float aOpacity;
+	attribute float aSize;
+	varying float vOpacity;
+	void main() {
+		vOpacity = aOpacity;
+		vec4 mv = modelViewMatrix * vec4(position, 1.0);
+		gl_PointSize = aSize;
+		gl_Position = projectionMatrix * mv;
+	}
+`;
+const PARTICLE_FRAG = `
+	uniform vec3 uColor;
+	varying float vOpacity;
+	void main() {
+		if (vOpacity <= 0.0) discard;
+		float d = length(gl_PointCoord - vec2(0.5));
+		if (d > 0.5) discard;
+		float a = smoothstep(0.5, 0.0, d) * vOpacity;
+		gl_FragColor = vec4(uColor, a);
+	}
+`;
 
 function buildHexPrism(): THREE.BufferGeometry {
 	const vx: number[] = [],
@@ -113,10 +152,14 @@ function buildMatrices() {
 	return { count: items.length, buf };
 }
 
-function readCssColor(): string | null {
+const BASE_COLOR = "#0d0d0f"; // decorative (non-key) columns
+
+// Read a CSS custom property and coerce it to a THREE-parseable color string.
+// Accepts hex ("#rrggbb") or a bare "r, g, b" triple (wrapped as rgb()).
+function readCssVarColor(name: string): string | null {
 	if (typeof window === "undefined") return null;
 	const raw = getComputedStyle(document.documentElement)
-		.getPropertyValue("--albumcolor")
+		.getPropertyValue(name)
 		.trim();
 	if (!raw) return null;
 	const val = raw.startsWith("#") ? raw : `rgb(${raw})`;
@@ -126,6 +169,10 @@ function readCssColor(): string | null {
 	} catch {
 		return null;
 	}
+}
+
+function readCssColor(): string | null {
+	return readCssVarColor("--albumcolor");
 }
 
 function Scene({
@@ -159,10 +206,11 @@ function Scene({
 	}, [floorColor]);
 
 	const geo = useMemo(() => buildHexPrism(), []);
+	// White base so per-instance colors (instanceColor) act as the true albedo.
 	const mat = useMemo(
 		() =>
 			new THREE.MeshStandardMaterial({
-				color: "#0d0d0f",
+				color: "#ffffff",
 				roughness: 0.6,
 				metalness: 0.0,
 				flatShading: true,
@@ -176,31 +224,164 @@ function Scene({
 	const animsRef = useRef(new Map<number, number>());
 	const scratchRef = useRef(new THREE.Matrix4());
 	const clock = useThree((s) => s.clock);
+	// Keyboard-hexagon color, tracking the --keycolor CSS var.
+	const [keyColor, setKeyColor] = useState("#004f98");
+	// Particle trail color, tracking the --lightvibrant CSS var.
+	const [trailColor, setTrailColor] = useState("#d8d8d8");
 
-	// One-time fill of every instance matrix from the base buffer.
+	// Particle pool (ring buffer). Geometry attrs drive the GPU; the parallel
+	// CPU arrays (velocity/birth/life) drive the per-frame simulation.
+	const pPos = useMemo(() => new Float32Array(MAX_PARTICLES * 3), []);
+	const pOpacity = useMemo(() => new Float32Array(MAX_PARTICLES), []);
+	const pSize = useMemo(() => new Float32Array(MAX_PARTICLES), []);
+	const pVel = useMemo(() => new Float32Array(MAX_PARTICLES * 3), []);
+	const pBirth = useMemo(() => {
+		const a = new Float32Array(MAX_PARTICLES);
+		a.fill(-1); // -1 = dead slot
+		return a;
+	}, []);
+	const pLife = useMemo(() => new Float32Array(MAX_PARTICLES), []);
+	const pNext = useRef(0); // next ring-buffer slot
+	const pActive = useRef(0); // live particle count (for frame early-out)
+	const prevKey = useRef<{ x: number; y: number; z: number; t: number } | null>(
+		null,
+	);
+
+	const particleGeo = useMemo(() => {
+		const g = new THREE.BufferGeometry();
+		g.setAttribute("position", new THREE.BufferAttribute(pPos, 3));
+		g.setAttribute("aOpacity", new THREE.BufferAttribute(pOpacity, 1));
+		g.setAttribute("aSize", new THREE.BufferAttribute(pSize, 1));
+		return g;
+	}, [pPos, pOpacity, pSize]);
+
+	const particleMat = useMemo(
+		() =>
+			new THREE.ShaderMaterial({
+				uniforms: { uColor: { value: new THREE.Color("#d8d8d8") } },
+				vertexShader: PARTICLE_VERT,
+				fragmentShader: PARTICLE_FRAG,
+				transparent: true,
+				depthTest: false, // always over the hexagons (still under the HTML clock)
+				depthWrite: false,
+				blending: THREE.AdditiveBlending,
+			}),
+		[],
+	);
+
+	useEffect(() => {
+		try {
+			(particleMat.uniforms.uColor.value as THREE.Color).set(trailColor);
+		} catch {}
+	}, [trailColor, particleMat]);
+
+	// One-time fill of every instance matrix + base (dark) color from the buffer.
 	useEffect(() => {
 		const mesh = meshRef.current;
 		if (!mesh) return;
 		const m = scratchRef.current;
+		const dark = new THREE.Color(BASE_COLOR);
 		for (let i = 0; i < count; i++) {
 			m.fromArray(buf, i * 16);
 			mesh.setMatrixAt(i, m);
+			mesh.setColorAt(i, dark);
 		}
 		mesh.instanceMatrix.needsUpdate = true;
+		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 	}, [count, buf]);
 
-	// Map key presses to a column pop. Ignore auto-repeat; share the R3F clock.
+	// Tint just the interactive (keyboard) columns with the current key color.
 	useEffect(() => {
+		const mesh = meshRef.current;
+		if (!mesh) return;
+		let c: THREE.Color;
+		try {
+			c = new THREE.Color(keyColor);
+		} catch {
+			return;
+		}
+		for (const i of KEYBOARD_INDEX_SET) mesh.setColorAt(i, c);
+		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+	}, [keyColor]);
+
+	// Map key presses to a column pop + a particle trail between consecutive keys.
+	useEffect(() => {
+		const spawnAt = (x: number, y: number, z: number, now: number) => {
+			const p = pNext.current;
+			pNext.current = (p + 1) % MAX_PARTICLES;
+			if (pBirth[p] < 0) pActive.current++; // reusing a dead slot
+			pPos[p * 3] = x;
+			pPos[p * 3 + 1] = y;
+			pPos[p * 3 + 2] = z;
+			pVel[p * 3] = (Math.random() * 2 - 1) * TRAIL_DRIFT;
+			pVel[p * 3 + 1] = TRAIL_RISE * (0.4 + Math.random() * 0.8);
+			pVel[p * 3 + 2] = (Math.random() * 2 - 1) * TRAIL_DRIFT;
+			pSize[p] = PARTICLE_SIZE * (0.6 + Math.random() * 0.8);
+			pLife[p] = PARTICLE_LIFETIME * (0.7 + Math.random() * 0.6);
+			pBirth[p] = now;
+			pOpacity[p] = 0;
+		};
+
 		const onKey = (e: KeyboardEvent) => {
 			if (e.repeat) return;
 			const i = codeToIndex(e.code);
 			if (i === undefined) return;
 			if (e.code === "Space") e.preventDefault(); // avoid page scroll
-			animsRef.current.set(i, clock.getElapsedTime());
+			const now = clock.getElapsedTime();
+			animsRef.current.set(i, now);
+
+			const x = buf[i * 16 + 12];
+			const y = buf[i * 16 + 13] + PARTICLE_Y;
+			const z = buf[i * 16 + 14];
+			const prev = prevKey.current;
+			if (prev && now - prev.t < TRAIL_MAX_GAP) {
+				// Lay particles along the segment from the previous key to this one.
+				const dx = x - prev.x,
+					dy = y - prev.y,
+					dz = z - prev.z;
+				const dist = Math.hypot(dx, dz);
+				const n = Math.max(
+					TRAIL_MIN,
+					Math.min(TRAIL_MAX, Math.round(dist * TRAIL_DENSITY)),
+				);
+				for (let k = 0; k < n; k++) {
+					const t = n === 1 ? 0.5 : k / (n - 1);
+					spawnAt(
+						prev.x + dx * t + (Math.random() * 2 - 1) * TRAIL_JITTER,
+						prev.y + dy * t,
+						prev.z + dz * t + (Math.random() * 2 - 1) * TRAIL_JITTER,
+						now,
+					);
+				}
+			} else {
+				// No recent predecessor: a small burst at the key itself.
+				for (let k = 0; k < TRAIL_BURST; k++) {
+					spawnAt(
+						x + (Math.random() * 2 - 1) * TRAIL_JITTER,
+						y,
+						z + (Math.random() * 2 - 1) * TRAIL_JITTER,
+						now,
+					);
+				}
+			}
+			prevKey.current = { x, y, z, t: now };
+			particleGeo.attributes.position.needsUpdate = true;
+			particleGeo.attributes.aOpacity.needsUpdate = true;
+			particleGeo.attributes.aSize.needsUpdate = true;
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [clock]);
+	}, [
+		clock,
+		buf,
+		particleGeo,
+		pPos,
+		pOpacity,
+		pSize,
+		pVel,
+		pBirth,
+		pLife,
+	]);
 
 	// Per-frame: offset each active column's Y, restoring base when it finishes.
 	useFrame(() => {
@@ -221,6 +402,36 @@ function Scene({
 			mesh.setMatrixAt(i, m);
 		}
 		mesh.instanceMatrix.needsUpdate = true;
+	});
+
+	// Per-frame: float + fade active particles; free them when their life ends.
+	useFrame((_, delta) => {
+		if (pActive.current <= 0) return;
+		const now = clock.getElapsedTime();
+		const dt = Math.min(delta, 0.05); // clamp on tab-refocus / hitches
+		for (let p = 0; p < MAX_PARTICLES; p++) {
+			const birth = pBirth[p];
+			if (birth < 0) continue;
+			const age = now - birth;
+			const life = pLife[p];
+			if (age >= life) {
+				pBirth[p] = -1;
+				pOpacity[p] = 0;
+				pActive.current--;
+				continue;
+			}
+			pPos[p * 3] += pVel[p * 3] * dt;
+			pPos[p * 3 + 1] += pVel[p * 3 + 1] * dt;
+			pPos[p * 3 + 2] += pVel[p * 3 + 2] * dt;
+			pVel[p * 3] *= TRAIL_DAMP;
+			pVel[p * 3 + 1] *= TRAIL_DAMP;
+			pVel[p * 3 + 2] *= TRAIL_DAMP;
+			const t = age / life;
+			const fadeIn = Math.min(1, age / PARTICLE_FADE_IN);
+			pOpacity[p] = fadeIn * (1 - t) * (1 - t); // quick-in, ease-out fade
+		}
+		particleGeo.attributes.position.needsUpdate = true;
+		particleGeo.attributes.aOpacity.needsUpdate = true;
 	});
 
 	useEffect(() => {
@@ -261,6 +472,27 @@ function Scene({
 		};
 	}, [lightColor]);
 
+	// Track --keycolor (interactive columns) and --lightvibrant (particle trail).
+	useEffect(() => {
+		const update = () => {
+			const k = readCssVarColor("--keycolor");
+			if (k) setKeyColor(k);
+			const t = readCssVarColor("--lightvibrant");
+			if (t) setTrailColor(t);
+		};
+		update();
+		const obs = new MutationObserver(update);
+		obs.observe(document.documentElement, {
+			attributes: true,
+			attributeFilter: ["class", "style"],
+		});
+		const iv = setInterval(update, 300);
+		return () => {
+			obs.disconnect();
+			clearInterval(iv);
+		};
+	}, []);
+
 	const az = (lightAzimuthDeg! * Math.PI) / 180;
 	const el = (lightElevDeg! * Math.PI) / 180;
 	const D = 60;
@@ -280,6 +512,13 @@ function Scene({
 				castShadow={false}
 			/>
 			<instancedMesh ref={meshRef} args={[geo, mat, count]} />
+
+			{/* Key-press particle trail; renders over the columns, under the HTML clock. */}
+			<points
+				geometry={particleGeo}
+				material={particleMat}
+				frustumCulled={false}
+			/>
 
 			<mesh position={[0, -8, 0]} rotation={[-Math.PI / 2, 0, 0]}>
 				<planeGeometry args={[500, 500]} />

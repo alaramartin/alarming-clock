@@ -26,9 +26,12 @@ export function qrToIndex(q: number, r: number): number | undefined {
 // Where the keyboard sits and how spread out it is, in grid units. If a key clips
 // outside the visible window (~q∈[-7,7], r∈[-3,2] at fov 6), tweak these.
 const KB_CENTER_Q = 0; // horizontal center of the keyboard, in q
-const KB_CENTER_R = 0; // vertical center of the keyboard, in r
-const KB_COL_STEP = 2; // q between adjacent keys (1 = touching, 2 = one buffer hex, 3 = two…)
-const KB_ROW_STEP = 3; // r between rows (1 = touching, 3 = two buffer rows…)
+const KB_CENTER_R = 1; // vertical center of the keyboard, in r (shifted down a bit)
+// NOTE: these are in grid-cell units, so they scale with R in BasaltBackground.tsx.
+// If you change R, divide these by the same factor to keep the on-screen footprint.
+const KB_COL_STEP = 2; // base q between adjacent keys (before scatter)
+const KB_ROW_STEP = 2.5; // base r between rows (before scatter)
+const KB_JITTER_RADIUS = 1; // each key is randomly nudged within this many hexes (0 = rigid grid)
 
 // Each row, top → bottom, as KeyboardEvent.code values, plus a small fractional
 // `rowOffset` (in q) for the subtle per-row keyboard stagger.
@@ -109,22 +112,61 @@ const ROWS: KbRow[] = [
 	},
 ];
 
+// --- Deterministic per-key scatter --------------------------------------------
+// A stable hash of the key code seeds a small PRNG so each key's random nudge is
+// the same on every load (the layout doesn't reshuffle when you refresh).
+function hashSeed(str: string): number {
+	let h = 2166136261 >>> 0;
+	for (let i = 0; i < str.length; i++) {
+		h ^= str.charCodeAt(i);
+		h = Math.imul(h, 16777619);
+	}
+	return h >>> 0;
+}
+function mulberry32(a: number): () => number {
+	return () => {
+		a = (a + 0x6d2b79f5) | 0;
+		let t = Math.imul(a ^ (a >>> 15), 1 | a);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+/** Axial hex-grid distance from the origin cell. */
+function hexDist(dq: number, dr: number): number {
+	return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
+}
+
 // Precompute the code → instance index table once at module load.
 const CODE_TO_INDEX: Record<string, number> = (() => {
 	const map: Record<string, number> = {};
+	const used = new Set<number>(); // ensure no two keys land on the same hexagon
 	const rowMid = (ROWS.length - 1) / 2; // center the rows vertically around KB_CENTER_R
 	ROWS.forEach((row, rowIdx) => {
-		const r = KB_CENTER_R + Math.round((rowIdx - rowMid) * KB_ROW_STEP);
+		const r0 = KB_CENTER_R + Math.round((rowIdx - rowMid) * KB_ROW_STEP);
 		const half = (row.codes.length - 1) / 2;
 		row.codes.forEach((code, keyIdx) => {
 			const slot = keyIdx - half; // symmetric horizontal slot around center
 			// Subtract r*0.5 to undo the grid's accumulating x-stagger (keeps rows
 			// vertically centered), then re-add a small rowOffset for keyboard feel.
-			const q = Math.round(
-				KB_CENTER_Q + slot * KB_COL_STEP - r * 0.5 + row.rowOffset,
+			const q0 = Math.round(
+				KB_CENTER_Q + slot * KB_COL_STEP - r0 * 0.5 + row.rowOffset,
 			);
-			const idx = qrToIndex(q, r);
-			if (idx !== undefined) map[code] = idx;
+			// Scatter: pick a stable random cell within KB_JITTER_RADIUS of the grid
+			// slot, skipping cells that are off-grid or already taken.
+			const rng = mulberry32(hashSeed(code));
+			let idx = qrToIndex(q0, r0);
+			for (let attempt = 0; attempt < 32; attempt++) {
+				const dq = Math.round((rng() * 2 - 1) * KB_JITTER_RADIUS);
+				const dr = Math.round((rng() * 2 - 1) * KB_JITTER_RADIUS);
+				if (hexDist(dq, dr) > KB_JITTER_RADIUS) continue;
+				const cand = qrToIndex(q0 + dq, r0 + dr);
+				if (cand === undefined || used.has(cand)) continue;
+				idx = cand;
+				break;
+			}
+			if (idx === undefined || used.has(idx)) return; // rare: leave unmapped
+			used.add(idx);
+			map[code] = idx;
 		});
 	});
 	return map;
@@ -134,3 +176,9 @@ const CODE_TO_INDEX: Record<string, number> = (() => {
 export function codeToIndex(code: string): number | undefined {
 	return CODE_TO_INDEX[code];
 }
+
+/** All instance indices that correspond to a mapped (interactive) key. */
+export const KEYBOARD_INDICES: readonly number[] = Array.from(
+	new Set(Object.values(CODE_TO_INDEX)),
+);
+export const KEYBOARD_INDEX_SET: ReadonlySet<number> = new Set(KEYBOARD_INDICES);

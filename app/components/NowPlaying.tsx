@@ -5,9 +5,19 @@ import Link from "next/link";
 import Vibrant from "node-vibrant";
 import type { Swatch } from "node-vibrant/lib/color";
 
+// --keycolor (keyboard hexagons): album Muted swatch while playing, else textred
+// while playing with no Muted swatch, else #004F98 when nothing is playing.
+const TEXTRED = "#cb2a26"; // keep in sync with --textred in globals.css
+const NO_SPOTIFY_KEY_COLOR = "#004F98";
+// --lightvibrant (key-press particle trail): album LightVibrant swatch, else this.
+const TRAIL_FALLBACK = "#d8d8d8"; // keep in sync with --textwhite in globals.css
+
 async function getAlbumColor(imageUrl: string | null): Promise<{
 	hex: string;
 	rgb: string;
+	secondaryHex: string | null;
+	secondaryRgb: string | null;
+	lightHex: string | null;
 } | null> {
 	if (!imageUrl) return null;
 
@@ -33,6 +43,8 @@ async function getAlbumColor(imageUrl: string | null): Promise<{
 		});
 
 	const swatch = candidates[0] ?? null;
+	// Keyboard color: the album's Muted swatch (DarkMuted as a fallback).
+	const secondary = palette.Muted ?? palette.DarkMuted ?? null;
 
 	console.log("palette:", {
 		Vibrant: palette.Vibrant
@@ -58,7 +70,15 @@ async function getAlbumColor(imageUrl: string | null): Promise<{
 			: null,
 	});
 
-	return swatch ? { hex: swatch.hex, rgb: swatch.rgb.join(", ") } : null;
+	return swatch
+		? {
+				hex: swatch.hex,
+				rgb: swatch.rgb.join(", "),
+				secondaryHex: secondary?.hex ?? null,
+				secondaryRgb: secondary ? secondary.rgb.join(", ") : null,
+				lightHex: palette.LightVibrant?.hex ?? null,
+			}
+		: null;
 }
 
 type Song = {
@@ -113,24 +133,35 @@ export default function NowPlaying() {
 	const [albumColor, setAlbumColor] = useState<{
 		hex: string;
 		rgb: string;
+		secondaryHex: string | null;
+		secondaryRgb: string | null;
+		lightHex: string | null;
 	} | null>(null);
 
 	useEffect(() => {
+		const rootStyle = document.documentElement.style;
 		if (!song?.albumImageUrl || !song?.isPlaying) {
 			setTimeout(() => {
 				setAlbumColor(null);
-				document.documentElement.style.setProperty(
-					"--albumcolor",
-					"203, 42, 38",
+				rootStyle.setProperty("--albumcolor", "203, 42, 38");
+				// Playing but no art -> textred; nothing playing -> #004F98.
+				rootStyle.setProperty(
+					"--keycolor",
+					song?.isPlaying ? TEXTRED : NO_SPOTIFY_KEY_COLOR,
 				);
+				rootStyle.setProperty("--lightvibrant", TRAIL_FALLBACK);
 			}, 0);
 			return;
 		}
 		getAlbumColor(song.albumImageUrl).then((color) => {
 			setAlbumColor(color);
-			document.documentElement.style.setProperty(
-				"--albumcolor",
-				color?.rgb ?? "203, 42, 38",
+			rootStyle.setProperty("--albumcolor", color?.rgb ?? "203, 42, 38");
+			// Muted album swatch, falling back to textred when there isn't one.
+			rootStyle.setProperty("--keycolor", color?.secondaryHex ?? TEXTRED);
+			// LightVibrant swatch for the particle trail.
+			rootStyle.setProperty(
+				"--lightvibrant",
+				color?.lightHex ?? TRAIL_FALLBACK,
 			);
 		});
 	}, [song?.albumImageUrl, song?.isPlaying]);

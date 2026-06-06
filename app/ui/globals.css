@@ -6,6 +6,8 @@
 	--textred: #cb2a26;
 	--textwhite: #d8d8d8;
 	--albumcolor: 203, 42, 38;
+	--keycolor: #004f98; /* color of the keyboard-activatable hexagons (no-Spotify default) */
+	--lightvibrant: #d8d8d8; /* key-press particle trail color (album LightVibrant) */
 }
 
 @theme {
