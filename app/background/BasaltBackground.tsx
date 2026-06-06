@@ -19,13 +19,16 @@ export interface BasaltBackgroundProps {
 
 const R = 1.2; // hexagon circumradius; also drives grid spacing (SX/SZ), so larger = fewer, bigger columns
 const COL_HEIGHT = 2.5;
-const AMPLITUDE = 5.5;
+// Terrain height band the noise is mapped into (noise ∈ ~[-1,1] → [MIN_Y, MAX_Y]).
+// Raise MIN_Y to lift the lowest columns / shrink the overall height range.
+const MIN_Y = -2.5;
+const MAX_Y = 5.5;
 const NOISE_SCALE = 0.15;
 const SX = R * Math.sqrt(3);
 const SZ = R * 1.5;
 
 // --- Key-hold rise / hold / fall (tunable) -----------------------------------
-const HOLD_HEIGHT = 6; // raised height while a key is held (toward the camera)
+const HOLD_TARGET_Y = -4.5; // absolute world Y a held column eases down to (only ever pushed down, never up — so already-low columns barely move)
 const RISE_DURATION = 0.13; // seconds to snap up to HOLD_HEIGHT
 const FALL_DURATION = 0.45; // seconds to settle back down after release
 const FALL_DAMP = 3; // settle damping on release (higher = bounce dies faster)
@@ -34,9 +37,12 @@ const FALL_OMEGA = 1.3 * Math.PI; // release spring frequency (one small bounce)
 const easeOutCubic = (u: number) => 1 - Math.pow(1 - u, 3);
 const easeOutQuad = (u: number) => 1 - (1 - u) * (1 - u);
 
-/** Held column height `t` seconds after keydown — eases up, then holds. */
-function riseOffset(t: number): number {
-	return HOLD_HEIGHT * easeOutCubic(Math.min(1, t / RISE_DURATION));
+/**
+ * Held column offset `t` seconds after keydown — eases toward `target`, then
+ * holds. `target` is the per-column drop (≤ 0) needed to reach `HOLD_TARGET_Y`.
+ */
+function riseOffset(t: number, target: number): number {
+	return target * easeOutCubic(Math.min(1, t / RISE_DURATION));
 }
 
 // --- Key-hold lens flare (tunable) -------------------------------------------
@@ -58,10 +64,15 @@ function flareScale(t: number): number {
 
 /** Current +Y offset of a held/released column (eased rise, then damped fall). */
 function holdHeight(
-	hold: { start: number; release: number | null; releaseOffset: number },
+	hold: {
+		start: number;
+		release: number | null;
+		releaseOffset: number;
+		target: number;
+	},
 	now: number,
 ): number {
-	if (hold.release === null) return riseOffset(now - hold.start);
+	if (hold.release === null) return riseOffset(now - hold.start, hold.target);
 	const s = (now - hold.release) / FALL_DURATION;
 	if (s >= 1) return 0;
 	return (
@@ -225,7 +236,8 @@ function buildMatrices() {
 		for (let r = -30; r <= 30; r++) {
 			const x = SX * (q + r * 0.5);
 			const z = SZ * r;
-			const y = noise(x * NOISE_SCALE, z * NOISE_SCALE) * AMPLITUDE;
+			const n = noise(x * NOISE_SCALE, z * NOISE_SCALE); // ~[-1, 1]
+			const y = MIN_Y + ((n + 1) / 2) * (MAX_Y - MIN_Y);
 			items.push([x, y, z]);
 		}
 	}
@@ -368,7 +380,8 @@ function Scene({
 	const { count, buf } = useMemo(() => buildMatrices(), []);
 	// Per-instance emissive (accent glow on keyboard columns; 0 elsewhere).
 	const emissiveAttr = useMemo(
-		() => new THREE.InstancedBufferAttribute(new Float32Array(count * 3), 3),
+		() =>
+			new THREE.InstancedBufferAttribute(new Float32Array(count * 3), 3),
 		[count],
 	);
 
@@ -377,7 +390,12 @@ function Scene({
 	const animsRef = useRef(
 		new Map<
 			number,
-			{ start: number; release: number | null; releaseOffset: number }
+			{
+				start: number;
+				release: number | null;
+				releaseOffset: number;
+				target: number;
+			}
 		>(),
 	);
 	const scratchRef = useRef(new THREE.Matrix4());
@@ -464,9 +482,12 @@ function Scene({
 	const pLife = useMemo(() => new Float32Array(MAX_PARTICLES), []);
 	const pNext = useRef(0); // next ring-buffer slot
 	const pActive = useRef(0); // live particle count (for frame early-out)
-	const prevKey = useRef<{ x: number; y: number; z: number; t: number } | null>(
-		null,
-	);
+	const prevKey = useRef<{
+		x: number;
+		y: number;
+		z: number;
+		t: number;
+	} | null>(null);
 
 	const particleGeo = useMemo(() => {
 		const g = new THREE.BufferGeometry();
@@ -566,10 +587,14 @@ function Scene({
 			if (i === undefined) return;
 			if (e.code === "Space") e.preventDefault(); // avoid page scroll
 			const now = clock.getElapsedTime();
+			// Drop this column to HOLD_TARGET_Y, but never push it up: columns
+			// already at/below the target get a 0 target so they stay put.
+			const target = Math.min(0, HOLD_TARGET_Y - buf[i * 16 + 13]);
 			animsRef.current.set(i, {
 				start: now,
 				release: null,
 				releaseOffset: 0,
+				target,
 			});
 
 			const x = buf[i * 16 + 12];
@@ -615,9 +640,13 @@ function Scene({
 				for (let k = 0; k < n; k++) {
 					const t = n === 1 ? 0.5 : k / (n - 1);
 					spawnAt(
-						prev.x + dx * t + (Math.random() * 2 - 1) * TRAIL_JITTER,
+						prev.x +
+							dx * t +
+							(Math.random() * 2 - 1) * TRAIL_JITTER,
 						prev.y + dy * t,
-						prev.z + dz * t + (Math.random() * 2 - 1) * TRAIL_JITTER,
+						prev.z +
+							dz * t +
+							(Math.random() * 2 - 1) * TRAIL_JITTER,
 						now,
 					);
 				}
@@ -643,7 +672,7 @@ function Scene({
 		const releaseHold = (i: number, now: number) => {
 			const hold = animsRef.current.get(i);
 			if (hold && hold.release === null) {
-				hold.releaseOffset = riseOffset(now - hold.start);
+				hold.releaseOffset = riseOffset(now - hold.start, hold.target);
 				hold.release = now;
 			}
 			const flare = flaresRef.current.get(i);
