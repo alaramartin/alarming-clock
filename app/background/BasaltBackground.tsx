@@ -24,31 +24,120 @@ const NOISE_SCALE = 0.15;
 const SX = R * Math.sqrt(3);
 const SZ = R * 1.5;
 
-// --- Key-press pop animation (tunable) ---------------------------------------
-const POP_HEIGHT = 6; // peak rise toward the camera, in world units
-const POP_DURATION = 0.45; // seconds from press to fully settled
-const POP_DAMP = 3.2; // settle damping (higher = bounce dies faster)
-const POP_OMEGA = 2.4 * Math.PI; // ~1.2 oscillations: one big pop + a small bounce
+// --- Key-hold rise / hold / fall (tunable) -----------------------------------
+const HOLD_HEIGHT = 6; // raised height while a key is held (toward the camera)
+const RISE_DURATION = 0.13; // seconds to snap up to HOLD_HEIGHT
+const FALL_DURATION = 0.45; // seconds to settle back down after release
+const FALL_DAMP = 3; // settle damping on release (higher = bounce dies faster)
+const FALL_OMEGA = 1.3 * Math.PI; // release spring frequency (one small bounce)
 
-// Normalize so the first (largest) peak of the damped sine equals 1.
-const POP_NORM = (() => {
-	let max = 1e-6;
-	for (let u = 0; u <= 1; u += 0.001) {
-		const v = Math.exp(-POP_DAMP * u) * Math.sin(POP_OMEGA * u);
-		if (v > max) max = v;
-	}
-	return max;
-})();
+const easeOutCubic = (u: number) => 1 - Math.pow(1 - u, 3);
+const easeOutQuad = (u: number) => 1 - (1 - u) * (1 - u);
 
-/** +Y offset for a column `t` seconds after it was pressed. 0 outside the pop. */
-function popOffset(t: number): number {
-	const u = t / POP_DURATION;
-	if (u <= 0 || u >= 1) return 0;
+/** Held column height `t` seconds after keydown — eases up, then holds. */
+function riseOffset(t: number): number {
+	return HOLD_HEIGHT * easeOutCubic(Math.min(1, t / RISE_DURATION));
+}
+
+// --- Key-hold lens flare (tunable) -------------------------------------------
+const FLARE_MAX = 4 * R; // overall flare extent (incl. streaks) at full hold
+const FLARE_TIME_TO_MAX = 2.0; // seconds of holding to reach FLARE_MAX
+const FLARE_FADE = 0.3; // seconds to fade out after release
+const FLARE_TINT = 0.15; // how far the white flare is tinted toward the album color
+const FLARE_POOL = 16; // max simultaneous flares (pooled sprites)
+// The flare emerges from behind/beside the rising column, not centered on top:
+const FLARE_SIDE = 0.85 * R; // lateral offset to one side of the column
+const FLARE_SIDE_DIRX = 0.7; // side direction in world x/z (screen-space "side")
+const FLARE_SIDE_DIRZ = 0.7;
+const FLARE_SINK = 0.7; // depth below the column top so the wall occludes it ("breaks through")
+
+/** Flare sprite size `t` seconds after keydown — grows, eased, capped at FLARE_MAX. */
+function flareScale(t: number): number {
+	return FLARE_MAX * easeOutQuad(Math.min(1, t / FLARE_TIME_TO_MAX));
+}
+
+/** Current +Y offset of a held/released column (eased rise, then damped fall). */
+function holdHeight(
+	hold: { start: number; release: number | null; releaseOffset: number },
+	now: number,
+): number {
+	if (hold.release === null) return riseOffset(now - hold.start);
+	const s = (now - hold.release) / FALL_DURATION;
+	if (s >= 1) return 0;
 	return (
-		(POP_HEIGHT / POP_NORM) *
-		Math.exp(-POP_DAMP * u) *
-		Math.sin(POP_OMEGA * u)
+		hold.releaseOffset * Math.exp(-FALL_DAMP * s) * Math.cos(FALL_OMEGA * s)
 	);
+}
+
+/** Starburst lens-flare texture: small bright core, anamorphic streaks, faint halo.
+ *  White on transparent — SpriteMaterial.color tints it; additive blending glows. */
+function makeFlareTexture(): THREE.Texture {
+	const size = 256;
+	const cv = document.createElement("canvas");
+	cv.width = cv.height = size;
+	const ctx = cv.getContext("2d")!;
+	ctx.translate(size / 2, size / 2);
+	ctx.globalCompositeOperation = "lighter"; // additive build-up
+
+	// small bright core + soft glow
+	const core = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.25);
+	core.addColorStop(0, "rgba(255,255,255,1)");
+	core.addColorStop(0.05, "rgba(255,255,255,0.95)");
+	core.addColorStop(0.15, "rgba(255,255,255,0.4)");
+	core.addColorStop(0.4, "rgba(255,255,255,0.08)");
+	core.addColorStop(1, "rgba(255,255,255,0)");
+	ctx.fillStyle = core;
+	ctx.beginPath();
+	ctx.arc(0, 0, size * 0.25, 0, Math.PI * 2);
+	ctx.fill();
+
+	const ray = (angle: number, len: number, halfWidth: number, a: number) => {
+		ctx.save();
+		ctx.rotate(angle);
+		const grad = ctx.createLinearGradient(0, 0, len, 0);
+		grad.addColorStop(0, `rgba(255,255,255,${a})`);
+		grad.addColorStop(0.12, `rgba(255,255,255,${a * 0.55})`);
+		grad.addColorStop(1, "rgba(255,255,255,0)");
+		ctx.fillStyle = grad;
+		ctx.beginPath();
+		ctx.moveTo(0, -halfWidth);
+		ctx.lineTo(len, 0);
+		ctx.lineTo(0, halfWidth);
+		ctx.closePath();
+		ctx.fill();
+		ctx.restore();
+	};
+
+	const reach = size * 0.5;
+	// 4 long primary spikes (both directions)
+	for (const base of [0, Math.PI / 2]) {
+		ray(base, reach * 0.95, 5, 0.85);
+		ray(base + Math.PI, reach * 0.95, 5, 0.85);
+	}
+	// 4 medium diagonal spikes
+	for (let k = 0; k < 4; k++) {
+		ray(Math.PI / 4 + (k * Math.PI) / 2, reach * 0.6, 3, 0.45);
+	}
+	// scattered thin rays (deterministic)
+	let seed = 7;
+	const rnd = () => {
+		seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+		return seed / 0x7fffffff;
+	};
+	for (let k = 0; k < 18; k++) {
+		ray(rnd() * Math.PI * 2, reach * (0.3 + rnd() * 0.5), 1.2, 0.16);
+	}
+
+	// faint halo ring
+	ctx.lineWidth = 2;
+	ctx.strokeStyle = "rgba(255,255,255,0.12)";
+	ctx.beginPath();
+	ctx.arc(0, 0, size * 0.34, 0, Math.PI * 2);
+	ctx.stroke();
+
+	const tex = new THREE.CanvasTexture(cv);
+	tex.colorSpace = THREE.SRGBColorSpace;
+	return tex;
 }
 
 // --- Key-press particle trail (tunable) --------------------------------------
@@ -220,10 +309,78 @@ function Scene({
 	const { count, buf } = useMemo(() => buildMatrices(), []);
 
 	const meshRef = useRef<THREE.InstancedMesh>(null);
-	// Active pops: instance index -> press start time (R3F clock seconds).
-	const animsRef = useRef(new Map<number, number>());
+	// Active holds: index -> { keydown time, keyup time | null, height at release }.
+	const animsRef = useRef(
+		new Map<
+			number,
+			{ start: number; release: number | null; releaseOffset: number }
+		>(),
+	);
 	const scratchRef = useRef(new THREE.Matrix4());
 	const clock = useThree((s) => s.clock);
+
+	// White flare, very slightly tinted toward the main album color.
+	const flareColor = useMemo(() => {
+		try {
+			return new THREE.Color("#ffffff").lerp(
+				new THREE.Color(resolved as string),
+				FLARE_TINT,
+			);
+		} catch {
+			return new THREE.Color("#ffffff");
+		}
+	}, [resolved]);
+
+	// Pooled flare sprites (avoids per-keystroke allocation). One Group of
+	// FLARE_POOL sprites, each with its own additive material + a shared glow tex.
+	const flarePool = useMemo(() => {
+		const tex = makeFlareTexture();
+		const group = new THREE.Group();
+		const sprites: THREE.Sprite[] = [];
+		for (let k = 0; k < FLARE_POOL; k++) {
+			const material = new THREE.SpriteMaterial({
+				map: tex,
+				color: 0xffffff,
+				transparent: true,
+				depthTest: true, // the hexagon wall occludes it → light "breaks through"
+				depthWrite: false,
+				blending: THREE.AdditiveBlending,
+				opacity: 0,
+			});
+			const sprite = new THREE.Sprite(material);
+			sprite.visible = false;
+			sprite.scale.set(0, 0, 1);
+			group.add(sprite);
+			sprites.push(sprite);
+		}
+		return { group, sprites };
+	}, []);
+	// index -> active flare; plus a free-slot stack into flarePool.sprites.
+	const flaresRef = useRef(
+		new Map<
+			number,
+			{
+				slot: number;
+				start: number;
+				release: number | null;
+				releaseScale: number;
+				x: number;
+				z: number;
+				baseY: number;
+			}
+		>(),
+	);
+	const freeSlots = useRef<number[] | null>(null);
+	if (freeSlots.current === null) {
+		freeSlots.current = Array.from({ length: FLARE_POOL }, (_, k) => k);
+	}
+
+	// Keep the pool's tint in sync with the album color.
+	useEffect(() => {
+		for (const s of flarePool.sprites) {
+			(s.material as THREE.SpriteMaterial).color.copy(flareColor);
+		}
+	}, [flareColor, flarePool]);
 	// Keyboard-hexagon color, tracking the --keycolor CSS var.
 	const [keyColor, setKeyColor] = useState("#004f98");
 	// Particle trail color, tracking the --lightvibrant CSS var.
@@ -328,11 +485,41 @@ function Scene({
 			if (i === undefined) return;
 			if (e.code === "Space") e.preventDefault(); // avoid page scroll
 			const now = clock.getElapsedTime();
-			animsRef.current.set(i, now);
+			animsRef.current.set(i, {
+				start: now,
+				release: null,
+				releaseOffset: 0,
+			});
 
 			const x = buf[i * 16 + 12];
 			const y = buf[i * 16 + 13] + PARTICLE_Y;
 			const z = buf[i * 16 + 14];
+
+			// Start a lens flare beside/behind the held column (if a pool slot is free).
+			const flares = flaresRef.current;
+			const free = freeSlots.current!;
+			if (!flares.has(i) && free.length > 0) {
+				const slot = free.pop()!;
+				const sprite = flarePool.sprites[slot];
+				const baseY = buf[i * 16 + 13];
+				sprite.position.set(
+					x + FLARE_SIDE * FLARE_SIDE_DIRX,
+					baseY + COL_HEIGHT - FLARE_SINK,
+					z + FLARE_SIDE * FLARE_SIDE_DIRZ,
+				);
+				sprite.scale.set(0.001, 0.001, 1);
+				(sprite.material as THREE.SpriteMaterial).opacity = 0;
+				sprite.visible = true;
+				flares.set(i, {
+					slot,
+					start: now,
+					release: null,
+					releaseScale: 0,
+					x,
+					z,
+					baseY,
+				});
+			}
 			const prev = prevKey.current;
 			if (prev && now - prev.t < TRAIL_MAX_GAP) {
 				// Lay particles along the segment from the previous key to this one.
@@ -369,12 +556,45 @@ function Scene({
 			particleGeo.attributes.aOpacity.needsUpdate = true;
 			particleGeo.attributes.aSize.needsUpdate = true;
 		};
+
+		// Release a held column + flare: freeze their current height/size, then let
+		// the per-frame loops play the fall and fade.
+		const releaseHold = (i: number, now: number) => {
+			const hold = animsRef.current.get(i);
+			if (hold && hold.release === null) {
+				hold.releaseOffset = riseOffset(now - hold.start);
+				hold.release = now;
+			}
+			const flare = flaresRef.current.get(i);
+			if (flare && flare.release === null) {
+				flare.releaseScale = flareScale(now - flare.start);
+				flare.release = now;
+			}
+		};
+		const onKeyUp = (e: KeyboardEvent) => {
+			const i = codeToIndex(e.code);
+			if (i === undefined) return;
+			releaseHold(i, clock.getElapsedTime());
+		};
+		const onBlur = () => {
+			const now = clock.getElapsedTime();
+			for (const i of animsRef.current.keys()) releaseHold(i, now);
+			for (const i of flaresRef.current.keys()) releaseHold(i, now);
+		};
+
 		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
+		window.addEventListener("keyup", onKeyUp);
+		window.addEventListener("blur", onBlur);
+		return () => {
+			window.removeEventListener("keydown", onKey);
+			window.removeEventListener("keyup", onKeyUp);
+			window.removeEventListener("blur", onBlur);
+		};
 	}, [
 		clock,
 		buf,
 		particleGeo,
+		flarePool,
 		pPos,
 		pOpacity,
 		pSize,
@@ -383,25 +603,61 @@ function Scene({
 		pLife,
 	]);
 
-	// Per-frame: offset each active column's Y, restoring base when it finishes.
+	// Per-frame: rise/hold while a key is down, fall + bounce after release.
 	useFrame(() => {
 		const mesh = meshRef.current;
 		const anims = animsRef.current;
 		if (!mesh || anims.size === 0) return;
 		const now = clock.getElapsedTime();
 		const m = scratchRef.current;
-		for (const [i, start] of anims) {
+		for (const [i, hold] of anims) {
 			m.fromArray(buf, i * 16);
-			const t = now - start;
-			if (t >= POP_DURATION) {
-				mesh.setMatrixAt(i, m); // exact base matrix, no drift
+			if (hold.release !== null && now - hold.release >= FALL_DURATION) {
+				mesh.setMatrixAt(i, m); // settled: exact base matrix, no drift
 				anims.delete(i);
 				continue;
 			}
-			m.elements[13] = buf[i * 16 + 13] + popOffset(t); // base Y + pop
+			m.elements[13] = buf[i * 16 + 13] + holdHeight(hold, now);
 			mesh.setMatrixAt(i, m);
 		}
 		mesh.instanceMatrix.needsUpdate = true;
+	});
+
+	// Per-frame: grow flares while held, fade + release them after keyup.
+	useFrame(() => {
+		const flares = flaresRef.current;
+		if (flares.size === 0) return;
+		const now = clock.getElapsedTime();
+		for (const [i, flare] of flares) {
+			const sprite = flarePool.sprites[flare.slot];
+			const mat = sprite.material as THREE.SpriteMaterial;
+			// Track the rising column so the flare stays at its top edge.
+			const hold = animsRef.current.get(i);
+			const rise = hold ? holdHeight(hold, now) : 0;
+			sprite.position.set(
+				flare.x + FLARE_SIDE * FLARE_SIDE_DIRX,
+				flare.baseY + COL_HEIGHT + rise - FLARE_SINK,
+				flare.z + FLARE_SIDE * FLARE_SIDE_DIRZ,
+			);
+			if (flare.release === null) {
+				const held = now - flare.start;
+				const sc = flareScale(held);
+				sprite.scale.set(sc, sc, 1);
+				mat.opacity = Math.min(1, held / 0.08); // quick fade-in
+			} else {
+				const fo = (now - flare.release) / FLARE_FADE;
+				if (fo >= 1) {
+					sprite.visible = false;
+					mat.opacity = 0;
+					freeSlots.current!.push(flare.slot);
+					flares.delete(i);
+					continue;
+				}
+				mat.opacity = 1 - fo;
+				const sc = flare.releaseScale * (1 + 0.25 * fo); // slight dissipating expand
+				sprite.scale.set(sc, sc, 1);
+			}
+		}
 	});
 
 	// Per-frame: float + fade active particles; free them when their life ends.
@@ -519,6 +775,9 @@ function Scene({
 				material={particleMat}
 				frustumCulled={false}
 			/>
+
+			{/* Key-hold lens flares (pooled sprites). */}
+			<primitive object={flarePool.group} />
 
 			<mesh position={[0, -8, 0]} rotation={[-Math.PI / 2, 0, 0]}>
 				<planeGeometry args={[500, 500]} />
