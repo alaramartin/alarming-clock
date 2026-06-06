@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useEffect, useState, useMemo, useCallback } from "react";
-import { Canvas, useThree } from "@react-three/fiber";
+import { useRef, useEffect, useState, useMemo } from "react";
+import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import dynamic from "next/dynamic";
 import * as THREE from "three";
 import { buildNoise } from "./noise";
+import { codeToIndex } from "./keyboardMap";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 
 export interface BasaltBackgroundProps {
@@ -22,6 +23,33 @@ const AMPLITUDE = 5.5;
 const NOISE_SCALE = 0.15;
 const SX = R * Math.sqrt(3);
 const SZ = R * 1.5;
+
+// --- Key-press pop animation (tunable) ---------------------------------------
+const POP_HEIGHT = 6; // peak rise toward the camera, in world units
+const POP_DURATION = 0.45; // seconds from press to fully settled
+const POP_DAMP = 3.2; // settle damping (higher = bounce dies faster)
+const POP_OMEGA = 2.4 * Math.PI; // ~1.2 oscillations: one big pop + a small bounce
+
+// Normalize so the first (largest) peak of the damped sine equals 1.
+const POP_NORM = (() => {
+	let max = 1e-6;
+	for (let u = 0; u <= 1; u += 0.001) {
+		const v = Math.exp(-POP_DAMP * u) * Math.sin(POP_OMEGA * u);
+		if (v > max) max = v;
+	}
+	return max;
+})();
+
+/** +Y offset for a column `t` seconds after it was pressed. 0 outside the pop. */
+function popOffset(t: number): number {
+	const u = t / POP_DURATION;
+	if (u <= 0 || u >= 1) return 0;
+	return (
+		(POP_HEIGHT / POP_NORM) *
+		Math.exp(-POP_DAMP * u) *
+		Math.sin(POP_OMEGA * u)
+	);
+}
 
 function buildHexPrism(): THREE.BufferGeometry {
 	const vx: number[] = [],
@@ -143,18 +171,57 @@ function Scene({
 	);
 	const { count, buf } = useMemo(() => buildMatrices(), []);
 
-	const refCb = useCallback(
-		(mesh: THREE.InstancedMesh | null) => {
-			if (!mesh) return;
-			const m = new THREE.Matrix4();
-			for (let i = 0; i < count; i++) {
-				m.fromArray(buf, i * 16);
-				mesh.setMatrixAt(i, m);
+	const meshRef = useRef<THREE.InstancedMesh>(null);
+	// Active pops: instance index -> press start time (R3F clock seconds).
+	const animsRef = useRef(new Map<number, number>());
+	const scratchRef = useRef(new THREE.Matrix4());
+	const clock = useThree((s) => s.clock);
+
+	// One-time fill of every instance matrix from the base buffer.
+	useEffect(() => {
+		const mesh = meshRef.current;
+		if (!mesh) return;
+		const m = scratchRef.current;
+		for (let i = 0; i < count; i++) {
+			m.fromArray(buf, i * 16);
+			mesh.setMatrixAt(i, m);
+		}
+		mesh.instanceMatrix.needsUpdate = true;
+	}, [count, buf]);
+
+	// Map key presses to a column pop. Ignore auto-repeat; share the R3F clock.
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if (e.repeat) return;
+			const i = codeToIndex(e.code);
+			if (i === undefined) return;
+			if (e.code === "Space") e.preventDefault(); // avoid page scroll
+			animsRef.current.set(i, clock.getElapsedTime());
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [clock]);
+
+	// Per-frame: offset each active column's Y, restoring base when it finishes.
+	useFrame(() => {
+		const mesh = meshRef.current;
+		const anims = animsRef.current;
+		if (!mesh || anims.size === 0) return;
+		const now = clock.getElapsedTime();
+		const m = scratchRef.current;
+		for (const [i, start] of anims) {
+			m.fromArray(buf, i * 16);
+			const t = now - start;
+			if (t >= POP_DURATION) {
+				mesh.setMatrixAt(i, m); // exact base matrix, no drift
+				anims.delete(i);
+				continue;
 			}
-			mesh.instanceMatrix.needsUpdate = true;
-		},
-		[count, buf],
-	);
+			m.elements[13] = buf[i * 16 + 13] + popOffset(t); // base Y + pop
+			mesh.setMatrixAt(i, m);
+		}
+		mesh.instanceMatrix.needsUpdate = true;
+	});
 
 	useEffect(() => {
 		const t = targetRef.current;
@@ -212,7 +279,7 @@ function Scene({
 				]}
 				castShadow={false}
 			/>
-			<instancedMesh ref={refCb} args={[geo, mat, count]} />
+			<instancedMesh ref={meshRef} args={[geo, mat, count]} />
 
 			<mesh position={[0, -8, 0]} rotation={[-Math.PI / 2, 0, 0]}>
 				<planeGeometry args={[500, 500]} />
