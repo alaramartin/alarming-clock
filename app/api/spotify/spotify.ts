@@ -21,7 +21,20 @@ const getAccessToken = async() => {
             refresh_token,
         }),
     });
-    return await response.json();
+
+    const body = await response.json();
+
+    // A revoked/expired refresh token comes back as 400 invalid_grant. Surface it
+    // loudly — otherwise it looks identical to "nothing is playing" downstream.
+    if (!response.ok || !body.access_token) {
+        throw new Error(
+            `Spotify token refresh failed (${response.status}): ${body.error ?? "unknown"}` +
+            `${body.error_description ? ` — ${body.error_description}` : ""}` +
+            `${body.error === "invalid_grant" ? "\nRe-run: npm run spotify:token" : ""}`
+        );
+    }
+
+    return body;
 }
 
 // request currently playing song

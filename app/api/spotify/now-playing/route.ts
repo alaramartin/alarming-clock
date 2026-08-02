@@ -8,7 +8,18 @@ export async function GET() {
 			return Response.json({ isPlaying: false });
 		}
 
-		if (response.status === 204 || response.status > 400) {
+		// 204 = authenticated fine, just nothing playing. Anything else non-OK is a
+		// real failure worth logging (401 = bad/insufficient token, 429 = rate limit).
+		if (response.status === 204) {
+			return Response.json({ isPlaying: false });
+		}
+
+		if (!response.ok) {
+			const detail = await response.text().catch(() => "");
+			console.error(
+				`Spotify now-playing failed: ${response.status} ${response.statusText}`,
+				detail.slice(0, 300)
+			);
 			return Response.json({ isPlaying: false });
 		}
 

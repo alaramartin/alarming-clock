@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "spotify:token": "node scripts/get-refresh-token.mjs"
   },
   "dependencies": {
     "@octokit/types": "^16.0.0",
